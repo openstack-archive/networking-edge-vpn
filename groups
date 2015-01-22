@@ -1,2 +1,4 @@
-d93f606a75005b225da8aecdf1673b2364096e11	networking-edge-vpn-release
+# UUID                                  	Group Name
+#
 656a13f789ba459ac5b960692891d861d480eb1b	networking-edge-vpn-core
+d93f606a75005b225da8aecdf1673b2364096e11	networking-edge-vpn-release
