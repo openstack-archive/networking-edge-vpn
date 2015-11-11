@@ -4,4 +4,4 @@ source = networking-edge-vpn
 omit = networking-edge-vpn/tests/*,networking-edge-vpn/openstack/*
 
 [report]
-ignore-errors = True
+ignore_errors = True
