@@ -11,37 +11,26 @@
 #    under the License.
 #
 
-import logging
+from neutronclient.common import extension
+from neutronclient.i18n import _
+from neutronclient.neutron import v2_0 as neutronv20
 import string
 
-from neutronclient.neutron import v2_0 as neutronv20
-from neutronclient.openstack.common.gettextutils import _
 
-
-class ListAttachmentCircuit(neutronv20.ListCommand):
-    """List AttachmentCircuits configurations that belong to a given tenant."""
-
+class AttachmentCircuit(extension.NeutronClientExtension):
     resource = 'attachment_circuit'
-    log = logging.getLogger(__name__ + '.ListAttachmentCircuit')
-    list_columns = [
-        'id', 'name', 'tenant_id'
-    ]
-    _formatters = {}
-    pagination_support = True
-    sorting_support = True
+    path = 'attachment-circuits'
+    resource_plural = '%ss' % resource
+    object_path = '/edgevpn/%s' % path
+    resource_path = '/edgevpn/%s/%%s' % path
+    versions = ['2.0']
 
 
-class ShowAttachmentCircuit(neutronv20.ShowCommand):
-    """Show information of a given AttachmentCircuit."""
-
-    resource = 'attachment_circuit'
-    log = logging.getLogger(__name__ + '.ShowAttachmentCircuit')
-
-
-class CreateAttachmentCircuit(neutronv20.CreateCommand):
+class AttachmentCircuitCreate(extension.ClientExtensionCreate,
+                              AttachmentCircuit):
     """Create a Attachment Circuit."""
-    resource = 'attachment_circuit'
-    log = logging.getLogger(__name__ + '.CreateAttachmentCircuit')
+
+    shell_command = 'attachment-circuit-create'
 
     def add_known_arguments(self, parser):
         parser.add_argument(
@@ -84,11 +73,11 @@ class CreateAttachmentCircuit(neutronv20.CreateCommand):
         return body
 
 
-class UpdateAttachmentCircuit(neutronv20.UpdateCommand):
+class AttachmentCircuitUpdate(extension.ClientExtensionUpdate,
+                              AttachmentCircuit):
     """Update a given AttachmentCircuit by modifying network list."""
 
-    resource = 'attachment_circuit'
-    log = logging.getLogger(__name__ + '.UpdateAttachmentCircuit')
+    shell_command = 'attachment-circuit-update'
 
     def add_known_arguments(self, parser):
 
@@ -115,8 +104,27 @@ class UpdateAttachmentCircuit(neutronv20.UpdateCommand):
         return body
 
 
-class DeleteAttachmentCircuit(neutronv20.DeleteCommand):
+class AttachmentCircuitDelete(extension.ClientExtensionDelete,
+                              AttachmentCircuit):
     """Delete a given AttachmentCircuit."""
 
-    resource = 'attachment_circuit'
-    log = logging.getLogger(__name__ + '.DeleteAttachmentCircuit')
+    shell_command = 'attachment-circuit-delete'
+
+
+class AttachmentCircuitList(extension.ClientExtensionList, AttachmentCircuit):
+    """List AttachmentCircuits configurations that belong to a given tenant."""
+
+    shell_command = 'attachment-circuit-list'
+
+    list_columns = [
+        'id', 'name', 'tenant_id'
+    ]
+    pagination_support = True
+    sorting_support = True
+
+
+class AttachmentCircuitShow(extension.ClientExtensionShow, AttachmentCircuit):
+    """Show information of a given AttachmentCircuit."""
+
+    shell_command = 'attachment-circuit-show'
+
