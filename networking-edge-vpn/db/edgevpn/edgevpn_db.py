@@ -9,29 +9,30 @@
 #    under the License.
 
 from neutron.db import api as qdbapi
-from neutron.db import db_base_plugin_v2 as base_db
+from neutron.db import common_db_mixin as base_db
 from neutron.db import model_base
 from neutron.db import models_v2
-from neutron.extensions import mplsvpn as mplsvpnextension
-from neutron.extensions.mplsvpn import MPLSVPNPluginBase
-from neutron.openstack.common import excutils
-from neutron.openstack.common import log as logging
-from neutron.openstack.common import uuidutils
+from neutron.extensions import edgevpn as edgevpnextension
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import db as ml2_db
+from oslo_log import log as logging
+from oslo_utils import excutils
+from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
+
 
 LOG = logging.getLogger(__name__)
 
 
 class AttachmentCircuit(model_base.BASEV2, models_v2.HasId,
                         models_v2.HasTenant):
+
     """Represents a Attached Circuit."""
     name = sa.Column(sa.String(255))
     network_type = sa.Column(sa.Enum("L2", "L3",
-                             name="network_type"),
+                                     name="network_type"),
                              nullable=False)
     provider_edge_id = sa.Column(sa.String(255),
                                  sa.ForeignKey('provideredges.id'),
@@ -51,188 +52,238 @@ class ACNetworkAssociation(model_base.BASEV2,
                            primary_key=True)
 
 
-class ACMPLSVPNAssociation(model_base.BASEV2,
+class ACEdgeVPNAssociation(model_base.BASEV2,
                            models_v2.HasId,
                            models_v2.HasStatusDescription):
-    mplsvpn_id = sa.Column(sa.String(36), sa.ForeignKey("mplsvpns.id"),
+    edgevpn_id = sa.Column(sa.String(36), sa.ForeignKey("edgevpns.id"),
                            primary_key=True)
     attachmentcircuit_id = sa.Column(sa.String(36),
                                      sa.ForeignKey("attachmentcircuits.id"),
                                      primary_key=True)
 
 
-class MPLSVPN(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
-    """Represents a MPLSVPN Object."""
+class MTEdgeVPNAssociation(model_base.BASEV2,
+                           models_v2.HasId,
+                           models_v2.HasStatusDescription):
+    edgevpn_id = sa.Column(sa.String(36), sa.ForeignKey("edgevpns.id"),
+                           primary_key=True)
+    mplstunnel_id = sa.Column(sa.String(36),
+                              sa.ForeignKey("mplstunnels.id"),
+                              primary_key=True)
+
+
+class EdgeVPN(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
+
+    """Represents a EdgeVPN Object."""
     name = sa.Column(sa.String(255))
     status = sa.Column(sa.String(16), nullable=False)
-    tunnel_type = sa.Column(sa.Enum("fullmesh", "Customized",
-                                    name="lsp_tunnel_type"),
-                            nullable=False)
-    tunnel_backup = sa.Column(sa.Enum("frr", "Secondary",
-                                      name="lsp_tunnel_backup"),
-                              nullable=False)
-    qos = sa.Column(sa.Enum("Gold", "Silver", "Bronze", name="qos"),
-                    nullable=False)
-    bandwidth = sa.Column(sa.Integer, nullable=False)
+    network_type = sa.Column(sa.Enum("L2", "L3",
+                                     name="network_type"),
+                             nullable=False)
     vpn_id = sa.Column(sa.String(36), default="", nullable=False)
-    attachment_circuits = orm.relationship("ACMPLSVPNAssociation",
-                                           backref="mplsvpns",
+    mpls_tunnels = orm.relationship("MTEdgeVPNAssociation",
+                                    backref="mplstunnels",
+                                    cascade="all", lazy="joined")
+    attachment_circuits = orm.relationship("ACEdgeVPNAssociation",
+                                           backref="edgevpns",
                                            cascade="all", lazy="joined")
 
 
+class MPLSTunnel(model_base.BASEV2, models_v2.HasId):
+
+    """Represents a MPLSTunnel Object."""
+    name = sa.Column(sa.String(255))
+    provider_edge_id = sa.Column(sa.String(255),
+                                 sa.ForeignKey('provideredges.id'),
+                                 nullable=False)
+    peer_ip_address = sa.Column(sa.String(255))
+    peer_ip_version = sa.Column(sa.String(255))
+    backup = sa.Column(sa.String(36))
+    qos = sa.Column(sa.String(36))
+    bandwidth = sa.Column(sa.Integer)
+
+
 class ProviderEdge(model_base.BASEV2, models_v2.HasId):
+
     """Represents a Provider Edge."""
     name = sa.Column(sa.String(36), nullable=False)
+    ip_address = sa.Column(sa.String(255))
+    ip_version = sa.Column(sa.String(36))
+    remote_flag = sa.Column(sa.String(36))
 
 
-class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
-    """MPLS VPN plugin database class using SQLAlchemy models."""
+class EdgeVPNPluginDb(edgevpnextension.EdgeVPNPluginBase,
+                      base_db.CommonDbMixin):
+
+    """Edge VPN plugin database class using SQLAlchemy models."""
 
     def __init__(self):
-        """Do the initialization for the mpls vpn service plugin here."""
-        qdbapi.register_models()
+        """Do the initialization for the edge vpn service plugin here."""
+        engine = qdbapi.get_engine()
+        model_base.BASEV2.metadata.create_all(engine)
 
     def _get_resource(self, context, model, v_id):
         try:
             r = self._get_by_id(context, model, v_id)
         except exc.NoResultFound:
             with excutils.save_and_reraise_exception():
-                if issubclass(model, MPLSVPN):
-                    raise mplsvpnextension.MPLSVPNNotFound(mplsvpn_id=v_id)
+                if issubclass(model, EdgeVPN):
+                    raise edgevpnextension.EdgeVPNNotFound(edgevpn_id=v_id)
                 elif issubclass(model, AttachmentCircuit):
-                    raise (mplsvpnextension.
+                    raise (edgevpnextension.
                            AttachmentCircuitNotFound(
                                attachmentcircuit_id=v_id))
                 elif issubclass(model, ProviderEdge):
-                    raise (mplsvpnextension.
+                    raise (edgevpnextension.
                            ProviderEdgeNotFound(provideredge_id=v_id))
+                elif issubclass(model, MPLSTunnel):
+                    raise (edgevpnextension.
+                           MPLSTunnelNotFound(mplstunnel_id=v_id))
         return r
 
-    def _create_attachment_circuits_dict(self, mplsvpn):
-        res = {mplsvpn['id']: mplsvpn['attachment_circuits']}
+    def _create_attachment_circuits_dict(self, edgevpn):
+        res = {edgevpn['id']: edgevpn['attachment_circuits']}
         return res
 
-    def _modify_mplsvpn_ac_associations(self, context, mplsvpn_id, ac_id_list):
+    def _modify_edgevpn_ac_associations(self, context, edgevpn_id, ac_id_list):
         with context.session.begin(subtransactions=True):
-            """Get associations and filter for mplsvpn."""
-            assoc_qry = context.session.query(ACMPLSVPNAssociation)
-            assocs = assoc_qry.filter_by(mplsvpn_id=mplsvpn_id).all()
+            """Get associations and filter for edgevpn."""
+            assoc_qry = context.session.query(ACEdgeVPNAssociation)
+            assocs = assoc_qry.filter_by(edgevpn_id=edgevpn_id).all()
             """
             For each association, delete if not in updated
-            attachment circuit list for mplsvpn.
+            attachment circuit list for edgevpn.
             """
             for assoc in assocs:
                 if assoc.attachmentcircuit_id not in ac_id_list:
                     assoc_db = self._get_resource(context,
-                                                  ACMPLSVPNAssociation,
+                                                  ACEdgeVPNAssociation,
                                                   assoc.id)
                     context.session.delete(assoc_db)
-            """Get mplsvpn from db and new list of associations."""
-            mplsvpn_db = self._get_resource(context, MPLSVPN, mplsvpn_id)
-            assoc_qry = context.session.query(ACMPLSVPNAssociation)
+            """Get edgevpn from db and new list of associations."""
+            edgevpn_db = self._get_resource(context, EdgeVPN, edgevpn_id)
+            assoc_qry = context.session.query(ACEdgeVPNAssociation)
             """
             For each attachment circuit in updated attachment circuit list
             verify association exists.  If not, create one.
             """
             for attachmentcircuit_id in ac_id_list:
-                assoc = (assoc_qry.filter_by(mplsvpn_id=mplsvpn_id,
+                assoc = (assoc_qry.filter_by(edgevpn_id=edgevpn_id,
                          attachmentcircuit_id=attachmentcircuit_id).first())
                 if not assoc:
-                    assoc = ACMPLSVPNAssociation(
-                        mplsvpn_id=mplsvpn_id,
+                    assoc = ACEdgeVPNAssociation(
+                        edgevpn_id=edgevpn_id,
                         attachmentcircuit_id=attachmentcircuit_id,
                         status=constants.ACTIVE)
-                    mplsvpn_db.attachment_circuits.append(assoc)
+                    edgevpn_db.attachment_circuits.append(assoc)
 
-    def _create_tunneloptions_dict(self, mplsvpn):
-        res = {'tunnel_type': mplsvpn['tunnel_type'],
-               'tunnel_backup': mplsvpn['tunnel_backup'],
-               'qos': mplsvpn['qos'],
-               'bandwidth': mplsvpn['bandwidth']}
+    def _modify_edgevpn_mt_associations(self, context, edgevpn_id, mt_id_list):
+        with context.session.begin(subtransactions=True):
+            """Get associations and filter for edgevpn."""
+            assoc_qry = context.session.query(MTEdgeVPNAssociation)
+            assocs = assoc_qry.filter_by(edgevpn_id=edgevpn_id).all()
+            """
+            For each association, delete if not in updated
+            mpls tunenel list for edgevpn.
+            """
+            for assoc in assocs:
+                if assoc.mplstunnel_id not in mt_id_list:
+                    assoc_db = self._get_resource(context,
+                                                  MTEdgeVPNAssociation,
+                                                  assoc.id)
+                    context.session.delete(assoc_db)
+            """Get edgevpn from db and new list of associations."""
+            edgevpn_db = self._get_resource(context, EdgeVPN, edgevpn_id)
+            assoc_qry = context.session.query(MTEdgeVPNAssociation)
+            """
+            For each mpls tunnel in updated mpls tunnel list
+            verify association exists.  If not, create one.
+            """
+            for mplstunnel_id in mt_id_list:
+                assoc = (assoc_qry.filter_by(edgevpn_id=edgevpn_id,
+                         mplstunnel_id=mplstunnel_id).first())
+                if not assoc:
+                    assoc = MTEdgeVPNAssociation(
+                        edgevpn_id=edgevpn_id,
+                        mplstunnel_id=mplstunnel_id,
+                        status=constants.ACTIVE)
+                    edgevpn_db.mpls_tunnels.append(assoc)
+
+    def _create_tunneloptions_dict(self, mplstunnel):
+        res = {'backup': mplstunnel['backup'],
+               'qos': mplstunnel['qos'],
+               'bandwidth': mplstunnel['bandwidth']}
         return res
 
-    def _make_mplsvpn_dict(self, mplsvpn, fields=None):
-        res = {'id': mplsvpn['id'],
-               'tenant_id': mplsvpn['tenant_id'],
-               'name': mplsvpn['name'],
-               'vpn_id': mplsvpn['vpn_id'],
-               'tunnel_options': self._create_tunneloptions_dict(mplsvpn),
-               'status': mplsvpn['status']}
+    def _make_edgevpn_dict(self, edgevpn, fields=None):
+        res = {'id': edgevpn['id'],
+               'tenant_id': edgevpn['tenant_id'],
+               'name': edgevpn['name'],
+               'vpn_id': edgevpn['vpn_id'],
+               'status': edgevpn['status']}
+        res['mpls_tunnels'] = ([n['mplstunnel_id']
+                               for n in edgevpn.mpls_tunnels])
         res['attachment_circuits'] = ([n['attachmentcircuit_id']
-                                      for n in mplsvpn.attachment_circuits])
+                                       for n in edgevpn.attachment_circuits])
         return self._fields(res, fields)
 
-    def create_mplsvpn(self, context, mplsvpn):
-        mplsvpns = mplsvpn['mplsvpn']
-        tenant_id = self._get_tenant_id_for_create(context, mplsvpns)
-        mplsvpn_db = (context.session.query(MPLSVPN).
+    def create_edgevpn(self, context, edgevpn):
+        edgevpns = edgevpn['edgevpn']
+        tenant_id = self._get_tenant_id_for_create(context, edgevpns)
+        edgevpn_db = (context.session.query(EdgeVPN).
                       filter_by(tenant_id=tenant_id).first())
-        if mplsvpn_db:
-            mplsvpn_id = mplsvpn_db['id']
-            raise (mplsvpnextension.
-                   DuplicateMPLSVPNForTenant(mplsvpn_id=mplsvpn_id,
+        if edgevpn_db:
+            edgevpn_id = edgevpn_db['id']
+            raise (edgevpnextension.
+                   DuplicateEdgeVPNForTenant(edgevpn_id=edgevpn_id,
                                              tenant_id=tenant_id))
-        tunnel_type = "fullmesh"
-        tunnel_backup = "frr"
-        qos = "Gold"
-        bandwidth = 10
-        tunnel_options = mplsvpns.get('tunnel_options')
-        if tunnel_options:
-            if tunnel_options.get('tunnel_type'):
-                tunnel_type = tunnel_options['tunnel_type']
-            if tunnel_options.get('tunnel_backup'):
-                tunnel_backup = tunnel_options['tunnel_backup']
-            if tunnel_options.get('qos'):
-                qos = tunnel_options['qos']
-            if tunnel_options.get('bandwidth'):
-                bandwidth = tunnel_options['bandwidth']
         with context.session.begin(subtransactions=True):
-            tenant_id = self._get_tenant_id_for_create(context, mplsvpns)
-            mplsvpns_db = MPLSVPN(id=uuidutils.generate_uuid(),
+            tenant_id = self._get_tenant_id_for_create(context, edgevpns)
+            edgevpns_db = EdgeVPN(id=uuidutils.generate_uuid(),
                                   tenant_id=tenant_id,
-                                  name=mplsvpns['name'],
-                                  tunnel_type=tunnel_type,
-                                  tunnel_backup=tunnel_backup,
-                                  qos=qos,
-                                  bandwidth=bandwidth,
+                                  name=edgevpns['name'],
                                   status=constants.PENDING_CREATE,
-                                  vpn_id=mplsvpns['vpn_id'])
-            context.session.add(mplsvpns_db)
-            self._modify_mplsvpn_ac_associations(context,
-                                                 mplsvpns_db.id,
-                                                 mplsvpns[
+                                  vpn_id=edgevpns['vpn_id'],
+                                  network_type=edgevpns['network_type'])
+            context.session.add(edgevpns_db)
+            self._modify_edgevpn_mt_associations(context,
+                                                 edgevpns_db.id,
+                                                 edgevpns['mpls_tunnels'])
+            self._modify_edgevpn_ac_associations(context,
+                                                 edgevpns_db.id,
+                                                 edgevpns[
                                                      'attachment_circuits'])
-        return self._make_mplsvpn_dict(mplsvpns_db)
+        return self._make_edgevpn_dict(edgevpns_db)
 
-    def update_mplsvpn(self, context, mplsvpn_id, mplsvpn):
-        mplsvpns = mplsvpn['mplsvpn']
+    def update_edgevpn(self, context, edgevpn_id, edgevpn):
+        edgevpns = edgevpn['edgevpn']
         with context.session.begin(subtransactions=True):
-            if 'attachment_circuits' in mplsvpns:
-                ac_id_list = mplsvpns['attachment_circuits']
-                self._modify_mplsvpn_ac_associations(context,
-                                                     mplsvpn_id,
+            if 'attachment_circuits' in edgevpns:
+                ac_id_list = edgevpns['attachment_circuits']
+                self._modify_edgevpn_ac_associations(context,
+                                                     edgevpn_id,
                                                      ac_id_list)
-            mplsvpn_db = self._get_resource(context, MPLSVPN, mplsvpn_id)
-        return self._make_mplsvpn_dict(mplsvpn_db)
+            edgevpn_db = self._get_resource(context, EdgeVPN, edgevpn_id)
+        return self._make_edgevpn_dict(edgevpn_db)
 
-    def update_mplsvpn_status_and_name(self, context, mplsvpn):
+    def update_edgevpn_status_and_name(self, context, edgevpn):
         with context.session.begin(subtransactions=True):
-            mplsvpns_db = self._get_resource(context, MPLSVPN, mplsvpn['id'])
-            mplsvpns_db['name'] = mplsvpn['name']
-            mplsvpns_db['status'] = mplsvpn['status']
-        return self._make_mplsvpn_dict(mplsvpns_db)
+            edgevpns_db = self._get_resource(context, EdgeVPN, edgevpn['id'])
+            edgevpns_db['name'] = edgevpn['name']
+            edgevpns_db['status'] = edgevpn['status']
+        return self._make_edgevpn_dict(edgevpns_db)
 
-    def delete_mplsvpn(self, context, mplsvpn_id):
+    def delete_edgevpn(self, context, edgevpn_id):
         with context.session.begin(subtransactions=True):
-            mplsvpns_db = self._get_resource(context, MPLSVPN, mplsvpn_id)
-            context.session.delete(mplsvpns_db)
+            edgevpns_db = self._get_resource(context, EdgeVPN, edgevpn_id)
+            context.session.delete(edgevpns_db)
 
-    def _get_mplsvpn(self, context, mplsvpn_id):
-        return self._get_resource(context, MPLSVPN, mplsvpn_id)
+    def _get_edgevpn(self, context, edgevpn_id):
+        return self._get_resource(context, EdgeVPN, edgevpn_id)
 
-    def get_mplsvpn(self, context, mplsvpn_id, fields=None):
-        mplsvpns_db = self._get_resource(context, MPLSVPN, mplsvpn_id)
-        return self._make_mplsvpn_dict(mplsvpns_db, fields)
+    def get_edgevpn(self, context, edgevpn_id, fields=None):
+        edgevpns_db = self._get_resource(context, EdgeVPN, edgevpn_id)
+        return self._make_edgevpn_dict(edgevpns_db, fields)
 
     def get_network_ports(self, context, network_id):
         session = context.session
@@ -240,13 +291,13 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                 filter_by(network_id=network_id,
                           device_owner='compute:nova').all())
 
-    def get_mplsvpn_for_tenant(self, context, tenant_id):
+    def get_edgevpn_for_tenant(self, context, tenant_id):
         session = context.session
-        return session.query(MPLSVPN).filter_by(tenant_id=tenant_id).first()
+        return session.query(EdgeVPN).filter_by(tenant_id=tenant_id).first()
 
-    def get_mplsvpns(self, context, filters=None, fields=None):
-        return self._get_collection(context, MPLSVPN,
-                                    self._make_mplsvpn_dict,
+    def get_edgevpns(self, context, filters=None, fields=None):
+        return self._get_collection(context, EdgeVPN,
+                                    self._make_edgevpn_dict,
                                     filters=filters, fields=fields)
 
     def _modify_ac_networks_associations(self, context,
@@ -278,7 +329,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                         status=constants.ACTIVE)
                     attachmentcircuit_db.networks.append(assoc)
 
-    def add_network_to_attachmentcircuit(context,
+    def add_network_to_attachmentcircuit(self, context,
                                          attachmentcircuit_id, network_id):
         with context.session.begin(subtransactions=True):
             session_qry = context.session.query(AttachmentCircuit)
@@ -304,7 +355,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                 attachmentcircuit_id=attachmentcircuit_id,
                 network_id=network_id).first()
             if assoc:
-                LOG.debug("assoc found, deleting")
+                LOG.debug("Assoc found, deleting.")
                 context.session.delete(assoc)
 
     def _make_attachmentcircuit_dict(self, attachmentcircuit, fields=None):
@@ -324,7 +375,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                                 filter_by(tenant_id=tenant_id).first())
         if attachmentcircuit_db:
             ac_id = attachmentcircuit_db['id']
-            raise (mplsvpnextension.
+            raise (edgevpnextension.
                    DuplicateAttachmentCircuitForTenant(
                        attachmentcircuit_id=ac_id, tenant_id=tenant_id))
         with context.session.begin(subtransactions=True):
@@ -376,17 +427,18 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                                     self._make_attachmentcircuit_dict,
                                     filters=filters, fields=fields)
 
-    def get_attachmentcircuit_for_tenant(context, tenant_id):
+    def get_attachmentcircuit_for_tenant(self, context, tenant_id):
         session = context.session
         return (session.query(AttachmentCircuit).
                 filter_by(tenant_id=tenant_id).first())
 
-    def get_attachmentcircuit(context, attachmentcircuit_id):
+    def get_attachmentcircuit(self, context, attachmentcircuit_id):
         session = context.session
         return (session.query(AttachmentCircuit).
                 filter_by(id=attachmentcircuit_id).first())
 
-    def get_vlans_for_attachment_circuit_id(context, attachmentcircuit_id):
+    def get_vlans_for_attachment_circuit_id(
+            self, context, attachmentcircuit_id):
         vlans = []
         session = context.session
         attachment_circuit = (session.query(AttachmentCircuit).
@@ -398,7 +450,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                 vlans.append(str(segment['segmentation_id']))
         return vlans
 
-    def get_vlans_for_attachment_circuit(context, attachment_circuit):
+    def get_vlans_for_attachment_circuit(self, context, attachment_circuit):
         vlans = []
         for network_id in attachment_circuit['networks']:
             segments = ml2_db.get_network_segments(context.session, network_id)
@@ -406,26 +458,34 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                 vlans.append(str(segment['segmentation_id']))
         return vlans
 
-    def get_mplsvpn_for_attachment_circuit(context, attachmentcircuit_id):
-        mplsvpn = None
-        assoc_qry = context.session.query(ACMPLSVPNAssociation)
+    def get_edgevpn_for_attachment_circuit(
+            self, context, attachmentcircuit_id):
+        edgevpn = None
+        assoc_qry = context.session.query(ACEdgeVPNAssociation)
         assoc = (assoc_qry.
                  filter_by(attachmentcircuit_id=attachmentcircuit_id).first())
         if assoc:
-            mplsvpn = (context.session.query(MPLSVPN).
-                       filter_by(id=assoc.mplsvpn_id).first())
-        return mplsvpn
+            edgevpn = (context.session.query(EdgeVPN).
+                       filter_by(id=assoc.edgevpn_id).first())
+        return edgevpn
 
     def _make_provideredge_dict(self, provideredge, fields=None):
         res = {'id': provideredge['id'],
-               'name': provideredge['name']}
+               'name': provideredge['name'],
+               'ip_address': provideredge['ip_address'],
+               'ip_version': provideredge['ip_version'],
+               'remote_flag': provideredge['remote_flag']}
         return self._fields(res, fields)
 
     def create_provider_edge(self, context, provider_edge):
         provideredges = provider_edge['provider_edge']
         with context.session.begin(subtransactions=True):
-            provideredges_db = ProviderEdge(id=uuidutils.generate_uuid(),
-                                            name=provideredges['name'])
+            provideredges_db = ProviderEdge(
+                id=uuidutils.generate_uuid(),
+                name=provideredges['name'],
+                ip_address=provideredges['ip_address'],
+                ip_version=provideredges['ip_version'],
+                remote_flag=provideredges['remote_flag'])
             context.session.add(provideredges_db)
         return self._make_provideredge_dict(provideredges_db)
 
@@ -454,3 +514,63 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
         return self._get_collection(context, ProviderEdge,
                                     self._make_provideredge_dict,
                                     filters=filters, fields=fields)
+
+    def create_mpls_tunnel(self, context, mpls_tunnel):
+        mplstunnels = mpls_tunnel['mpls_tunnel']
+        backup = "frr"
+        qos = "Gold"
+        bandwidth = 10
+        tunnel_options = mplstunnels.get('tunnel_options')
+        if tunnel_options:
+            if tunnel_options.get('backup'):
+                backup = tunnel_options['backup']
+            if tunnel_options.get('qos'):
+                qos = tunnel_options['qos']
+            if tunnel_options.get('bandwidth'):
+                bandwidth = tunnel_options['bandwidth']
+        with context.session.begin(subtransactions=True):
+            mplstunnels_db = MPLSTunnel(
+                id=uuidutils.generate_uuid(),
+                name=mplstunnels['name'],
+                provider_edge_id=mplstunnels['provider_edge_id'],
+                backup=backup,
+                qos=qos,
+                bandwidth=bandwidth,
+                status=constants.PENDING_CREATE)
+            context.session.add(mplstunnels_db)
+        return self._make_mplstunnel_dict(mplstunnels_db)
+
+    def update_mpls_tunnel(self, context, mpls_tunnel):
+        with context.session.begin(subtransactions=True):
+            mplstunnels_db = self._get_resource(context, MPLSTunnel,
+                                                mpls_tunnel['id'])
+            mplstunnels_db.update(mpls_tunnel)
+        return self._make_mplstunnel_dict(mplstunnels_db)
+
+    def delete_mpls_tunnel(self, context, mpls_tunnel_id):
+        with context.session.begin(subtransactions=True):
+            mplstunnels_db = self._get_resource(context, MPLSTunnel,
+                                                mpls_tunnel_id)
+            context.session.delete(mplstunnels_db)
+
+    def _get_mpls_tunnel(self, context, mpls_tunnel_id):
+        return self._get_resource(context, MPLSTunnel, mpls_tunnel_id)
+
+    def get_mpls_tunnel(self, context, mpls_tunnel_id, fields=None):
+        mplstunnels_db = self._get_resource(context, MPLSTunnel,
+                                            mpls_tunnel_id)
+        return self._make_mplstunnel_dict(mplstunnels_db, fields)
+
+    def get_mpls_tunnels(self, context, filters=None, fields=None):
+        return self._get_collection(context, MPLSTunnel,
+                                    self._make_mplstunnel_dict,
+                                    filters=filters, fields=fields)
+
+    def _make_mplstunnel_dict(self, mplstunnel, fields=None):
+        res = {'id': mplstunnel['id'],
+               'name': mplstunnel['name'],
+               'provider_edge_id': mplstunnel['provider_edge_id'],
+               'peer_ip_address': mplstunnel['peer_ip_address'],
+               'peer_ip_version': mplstunnel['peer_ip_version'],
+               'tunnel_options': self._create_tunneloptions_dict(mplstunnel)}
+        return self._fields(res, fields)

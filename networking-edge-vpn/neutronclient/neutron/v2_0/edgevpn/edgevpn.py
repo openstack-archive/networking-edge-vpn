@@ -10,62 +10,43 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-
-import logging
 import string
 
+from neutronclient.common import extension
+from neutronclient.i18n import _
 from neutronclient.neutron import v2_0 as neutronv20
-from neutronclient.openstack.common.gettextutils import _
 
 
-class ListMPLSVPN(neutronv20.ListCommand):
-    """List MPLSVPN configurations that belong to a given tenant."""
-
-    resource = 'mplsvpn'
-    log = logging.getLogger(__name__ + '.ListMPLSVPN')
-    list_columns = [
-        'id', 'name', 'status'
-    ]
-    _formatters = {}
-    pagination_support = True
-    sorting_support = True
+class EdgeVPN(extension.NeutronClientExtension):
+    resource = 'edgevpn'
+    path = 'edgevpns'
+    resource_plural = '%ss' % resource
+    object_path = '/edgevpn/%s' % path
+    resource_path = '/edgevpn/%s/%%s' % path
+    versions = ['2.0']
 
 
-class ShowMPLSVPN(neutronv20.ShowCommand):
-    """Show information of a given MPLSVPN."""
-
-    resource = 'mplsvpn'
-    log = logging.getLogger(__name__ + '.ShowMPLSVPN')
-
-
-class CreateMPLSVPN(neutronv20.CreateCommand):
+class EdgeVPNCreate(extension.ClientExtensionCreate, EdgeVPN):
     """Create a MPLSVPN."""
-    resource = 'mplsvpn'
-    log = logging.getLogger(__name__ + '.CreateMPLSVPN')
+
+    shell_command = 'edge-vpn-create'
 
     def add_known_arguments(self, parser):
+        parser.add_argument(
+            '--name', default='',
+            help=_('The MPLSVPN name to assign.'))
         parser.add_argument(
             '--vpn-id',
             required=True,
             help=_('VPLS ID'))
         parser.add_argument(
-            '--name', default='',
-            help=_('The MPLSVPN name to assign.'))
+            '--network-type', default='L2',
+            choices=['L2', 'L3'],
+            help=_('Type of Network, default: L2. Other option: L3'))
         parser.add_argument(
-            '--tunnel-type', default='fullmesh',
-            choices=['fullmesh', 'Customized'],
-            help=_('LSP tunnel type.'))
-        parser.add_argument(
-            '--tunnel-backup', default='frr',
-            choices=['frr', 'Secondary'],
-            help=_('Tunnel failover option.'))
-        parser.add_argument(
-            '--qos', default='Gold',
-            choices=['Gold', 'Silver', 'Bronze'],
-            help=_('Tunnel qos'))
-        parser.add_argument(
-            '--bandwidth', default='10',
-            help=_('Tunnel bandwidth, default: 10.'))
+            '--mpls-tunnels', type=string.split, default="",
+            help=_('List of whitespace-delimited mpls tunnel names or IDs;'
+                   ' e.g., --mpls-tunnels \"tunn1 tunn2\"'))
         parser.add_argument(
             '--attachment-circuits', type=string.split,
             help=_('List of whitespace-delimited attachment circuit'
@@ -76,21 +57,24 @@ class CreateMPLSVPN(neutronv20.CreateCommand):
             self.resource: {
                 'vpn_id': parsed_args.vpn_id,
                 'name': parsed_args.name,
-                'tunnel_options': {
-                    'tunnel_type': parsed_args.tunnel_type,
-                    'tunnel_backup': parsed_args.tunnel_backup,
-                    'qos': parsed_args.qos,
-                    'bandwidth': parsed_args.bandwidth
-                }
+                'network_type': parsed_args.network_type
             }
         }
+        if parsed_args.mpls_tunnels:
+            _mpls_tunnels = []
+            for n in parsed_args.mpls_tunnels:
+                _mpls_tunnels.append(
+                    neutronv20.find_resourceid_by_name_or_id(
+                        self.get_client(), 'mpls_tunnel', n))
+            body['edgevpn'].update({'mpls_tunnels': _mpls_tunnels})
+
         if parsed_args.attachment_circuits:
             _attachment_circuits = []
             for n in parsed_args.attachment_circuits:
                 _attachment_circuits.append(
                     neutronv20.find_resourceid_by_name_or_id(
                         self.get_client(), 'attachment_circuit', n))
-            (body['mplsvpn'].
+            (body['edgevpn'].
              update({'attachment_circuits': _attachment_circuits}))
 
         neutronv20.update_dict(parsed_args, body[self.resource],
@@ -98,11 +82,10 @@ class CreateMPLSVPN(neutronv20.CreateCommand):
         return body
 
 
-class UpdateMPLSVPN(neutronv20.UpdateCommand):
-    """Update a given MPLSVPN by modifying attachment circuit list."""
+class EdgeVPNUpdate(extension.ClientExtensionUpdate, EdgeVPN):
+    """Update a given EDGEVPN by modifying attachment circuit list."""
 
-    resource = 'mplsvpn'
-    log = logging.getLogger(__name__ + '.UpdateMPLSVPN')
+    shell_command = 'edge-vpn-update'
 
     def add_known_arguments(self, parser):
 
@@ -125,13 +108,30 @@ class UpdateMPLSVPN(neutronv20.UpdateCommand):
                 _attachment_circuits.append(
                     neutronv20.find_resourceid_by_name_or_id(
                         self.get_client(), 'attachment_circuit', n))
-            (body['mplsvpn'].
+            (body['edgevpn'].
              update({'attachment_circuits': _attachment_circuits}))
         return body
 
 
-class DeleteMPLSVPN(neutronv20.DeleteCommand):
-    """Delete a given MPLSVPN."""
+class EdgeVPNDelete(extension.ClientExtensionDelete, EdgeVPN):
+    """Delete a given EDGEVPN."""
 
-    resource = 'mplsvpn'
-    log = logging.getLogger(__name__ + '.DeleteMPLSVPN')
+    shell_command = 'edge-vpn-delete'
+
+
+class EdgeVPNList(extension.ClientExtensionList, EdgeVPN):
+    """List EDGEVPN configurations that belong to a given tenant."""
+
+    shell_command = 'edge-vpn-list'
+
+    list_columns = [
+        'id', 'name', 'status'
+    ]
+    pagination_support = True
+    sorting_support = True
+
+
+class EdgeVPNShow(extension.ClientExtensionShow, EdgeVPN):
+    """Show information of a given EDGEVPN."""
+
+    shell_command = 'edge-vpn-show'
