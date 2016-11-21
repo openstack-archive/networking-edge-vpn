@@ -393,7 +393,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
                               filter_by(id=attachmentcircuit_id).first())
         net_id_list = [n['network_id'] for n in attachment_circuit.networks]
         for network_id in net_id_list:
-            segments = ml2_db.get_network_segments(context.session, network_id)
+            segments = ml2_db.get_network_segments(context, network_id)
             for segment in segments:
                 vlans.append(str(segment['segmentation_id']))
         return vlans
@@ -401,7 +401,7 @@ class MPLSVPNPluginDb(MPLSVPNPluginBase, base_db.CommonDbMixin):
     def get_vlans_for_attachment_circuit(context, attachment_circuit):
         vlans = []
         for network_id in attachment_circuit['networks']:
-            segments = ml2_db.get_network_segments(context.session, network_id)
+            segments = ml2_db.get_network_segments(context, network_id)
             for segment in segments:
                 vlans.append(str(segment['segmentation_id']))
         return vlans
